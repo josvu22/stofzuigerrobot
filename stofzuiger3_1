@@ -1,0 +1,131 @@
+#include "mbed.h"
+
+//STOFZUIGER 3
+InterruptIn button(USER_BUTTON);    //start/stopknop
+
+//Analoge uitgangen
+PwmOut linkspwm(D5);
+PwmOut rechtspwm(D6);
+
+//Digitale uitgangen
+DigitalOut state_led(LED1);         //led op nucleo
+DigitalOut links_vooruit(D8);       //linker motor vooruit
+DigitalOut links_achteruit(D9);     //linker motor achteruit
+DigitalOut rechts_vooruit(D10);     //rechter motor vooruit
+DigitalOut rechts_achteruit(D11);   //rechter motor achteruit
+
+//Analoge ingangen
+AnalogIn ir_links(A0);              //input linker ultrasone
+AnalogIn ir_midden(A1);             //input midden ultrasone
+AnalogIn ir_rechts(A2);             //input rechter ultrasone
+
+//Functie declaraties
+void toggle(void);
+void vooruit(double duty);
+void links(double duty);
+void rechts(double duty);
+void achteruit(double duty);
+void infrarood(double irl, double irm, double irr);
+
+volatile bool sleepmode = true;                     //begin in slaapmodus
+
+int main() {
+    linkspwm.period_ms(100);                        //stel de periode van de duty-cycle in op 100
+    rechtspwm.period_ms(100);                       //100 is een makkelijke waarde omdat er dan van een percentage kan worden uitgegaan (100%)
+    state_led = true;                               //led is waar (om aan te geven dat hij in slaapmodus staat)
+    button.rise(&toggle);                           //als interrupt-button waar wordt ga naar toggle-functie
+    while(1){
+        switch(sleepmode){
+        case true:
+            linkspwm.pulsewidth_ms(0);              //maak de duty-cycle van de linker motor 0% (linker motor gaat uit)
+            rechtspwm.pulsewidth_ms(0);
+            break;
+        case false:
+            infrarood(ir_links.read(), ir_midden.read(), ir_rechts.read());  //roept functie infrarood aan en geeft de drie gelezen infrarood-waardes mee
+            break;
+        }
+        wait_ms(100);                               //wacht 100 milliseconde voordat hij de while-loop opnieuw doorloopt
+    }
+}
+
+//toggle-functie
+void toggle() {
+    sleepmode =! sleepmode;                         //verander slaapmodus
+    state_led =! state_led;                         //verander status-led zodat de gebruiker kan zien of slaapmodus aan of uit staat
+    }
+
+//functie vooruit
+void vooruit(double duty){
+    linkspwm.pulsewidth_ms(duty);                   //geef de duty-cycle door aan de linker motor
+    rechtspwm.pulsewidth_ms(duty);                  //geef de duty-cycle door aan de rechter motor
+    links_achteruit = false;                        //maak de uitgang voor links-achteruit onwaar
+    links_vooruit = true;                           //maak de uitgang voor links-vooruit waar
+    rechts_achteruit = false;
+    rechts_vooruit = true;
+
+    //printf("\r\nvooruit: Links: %f", ir_links.read());        //dit is om de ultrasone-waardes weer te geven op een computerscherm
+    //printf("\r\nvooruit: Midden: %f", ir_midden.read());
+    //printf("\r\nvooruit: Rechts: %f", ir_rechts.read());
+    }
+    
+//functie links
+void links(double duty){
+    linkspwm.pulsewidth_ms(duty);
+    rechtspwm.pulsewidth_ms(duty);
+    links_vooruit = false;
+    links_achteruit = true;
+    rechts_achteruit = false;
+    rechts_vooruit = true;
+    
+    //printf("\r\nlinks: Links: %f", ir_links.read());
+    //printf("\r\nlinks: Midden: %f", ir_midden.read());
+    //printf("\r\nlinks: Rechts: %f", ir_rechts.read());
+    }
+
+//functie rechts
+void rechts(double duty){
+    linkspwm.pulsewidth_ms(duty);
+    rechtspwm.pulsewidth_ms(duty);
+    links_achteruit = false;
+    links_vooruit = true;
+    rechts_vooruit = false;
+    rechts_achteruit = true;
+    
+    //printf("\r\nrechts: Links: %f", ir_links.read());
+    //printf("\r\nrechts: Midden: %f", ir_midden.read());
+    //printf("\r\nrechts: Rechts: %f", ir_rechts.read());
+    }   
+
+//functie achteruit
+void achteruit(double duty){
+    linkspwm.pulsewidth_ms(duty);
+    rechtspwm.pulsewidth_ms(duty);
+    links_vooruit = false;
+    links_achteruit = true;
+    rechts_vooruit = false;
+    rechts_achteruit = true;
+
+    //printf("\r\nachteruit: Links: %f", ir_links.read());
+    //printf("\r\nachteruit: Midden: %f", ir_midden.read());
+    //printf("\r\nachteruit: Rechts: %f", ir_rechts.read());
+    }
+
+//infraroodfunctie (wat moet hij doen met de ingelezen infrarood-waardes?) 
+void infrarood(double irl, double irm, double irr) {
+    if (irm > 0.3 || irm < 0.01 || (irr > 0.3 && irl > 0.3) || (irr < 0.01 && irl < 0.01)) {    //als de middelste of de linker- en rechter-sensor een te grote of te kleine afstand meet
+        achteruit(100);                     //ga achteruit en geef 100% duty-cycle(motoren draaien op 100% snelheid)
+        wait_ms(350);
+        links(100);
+        wait_ms(rand()%(45)*10+200);        //wacht een random tijd zodat de draai iedere keer verschilt en de robot nooit vast kan blijven zitten (bijv. in een hoekje)
+        }
+    else if (irr > 0.3)                     //als de rechtersensor een te grootte waarde meet
+        links(140*irr);                     //ga links en geef duty-cycle 140*gemeten waarde mee (stel irr = 0.6, 140*0.6 = 84%)
+    else if (irr < 0.01)                    //als de rechtersensor een te kleine waarde meet
+        links(14000*(0.01-irr));            //ga links en geef duty-cycle 14000*0.01-gemeten waarde mee (stel irr = 0.004, 14000*(0.01-0.004) = 84%)
+    else if (irl > 0.3)                     //als de linkersensor een te grootte waarde meet
+        rechts(140*irl);
+    else if (irl < 0.01)                    //als de linkersensor een te kleine waarde meet
+        rechts(14000*(0.01-irl));
+    else
+        vooruit(100);
+    }
